@@ -1,19 +1,18 @@
-[project]
+[tool.poetry]
 name = "demo-app"
 version = "0.1.0"
-description = ""
-authors = [
-    {name = "brian.perret",email = "brian.perret@epita.fr"}
-]
+description = "Hybrid Cloud Demo App"
+authors = ["brian.perret <brian.perret@epita.fr>"]
 readme = "README.md"
-requires-python = ">=3.13"
-dependencies = [
-    "fastapi (>=0.136.0,<0.137.0)",
-    "uvicorn (>=0.45.0,<0.46.0)",
-    "psycopg2-binary (>=2.9.12,<3.0.0)"
-]
+package-mode = false
+
+[tool.poetry.dependencies]
+python = "^3.13"
+fastapi = "^0.136.0"
+uvicorn = "^0.45.0"
+psycopg2-binary = "^2.9.12"
 
 
 [build-system]
-requires = ["poetry-core>=2.0.0,<3.0.0"]
+requires = ["poetry-core"]
 build-backend = "poetry.core.masonry.api"
