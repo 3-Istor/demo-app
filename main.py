@@ -267,7 +267,7 @@ def index():
         
         <div class="footer">
             <p>🔄 Automatic refresh every 3 seconds</p>
-            <p><i>Failover test: Stop a DB node to trigger Patroni leader election (~35s)</i></p>
+            <p><i>Failover test: Stop a DB node to trigger Patroni leader election (~15s)</i></p>
         </div>
     </div>
     
