@@ -168,7 +168,7 @@ def index():
     """Main page with modern UI"""
     return """
 <!DOCTYPE html>
-<html lang="fr">
+<html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -378,20 +378,20 @@ def index():
             <h2 style="margin-bottom: 20px;">💬 Message Board</h2>
             
             <form class="message-form" id="msg-form">
-                <input type="text" id="author" placeholder="Votre nom (optionnel)" maxlength="50">
-                <textarea id="content" placeholder="Votre message..." rows="3" maxlength="500" required></textarea>
-                <button type="submit">Envoyer</button>
+                <input type="text" id="author" placeholder="Your name (optional)" maxlength="50">
+                <textarea id="content" placeholder="Your message..." rows="3" maxlength="500" required></textarea>
+                <button type="submit">Send</button>
             </form>
             
-            <h3 style="margin-bottom: 15px;">Messages récents</h3>
+            <h3 style="margin-bottom: 15px;">Recent Messages</h3>
             <div class="messages-list" id="messages">
-                <p style="text-align: center; color: #999;">Chargement...</p>
+                <p style="text-align: center; color: #999;">Loading...</p>
             </div>
         </div>
         
         <div class="footer">
-            <p>💡 Testez la résilience : Arrêtez une VM DB pour voir le failover Patroni (~35s)</p>
-            <p>🔄 Auto-refresh toutes les 3 secondes</p>
+            <p>💡 Test resilience: Stop a DB VM to see Patroni failover (~35s)</p>
+            <p>🔄 Auto-refresh every 3 seconds</p>
         </div>
     </div>
     
@@ -426,7 +426,7 @@ def index():
                 const container = document.getElementById('messages');
                 
                 if (data.messages.length === 0) {
-                    container.innerHTML = '<p style="text-align: center; color: #999;">Aucun message pour le moment</p>';
+                    container.innerHTML = '<p style="text-align: center; color: #999;">No messages yet</p>';
                     return;
                 }
                 
@@ -434,11 +434,11 @@ def index():
                     <div class="message-item">
                         <div class="message-author">${msg.author}</div>
                         <div>${msg.content}</div>
-                        <div class="message-time">${new Date(msg.created_at).toLocaleString('fr-FR')}</div>
+                        <div class="message-time">${new Date(msg.created_at).toLocaleString('en-US')}</div>
                     </div>
                 `).join('');
             } catch (e) {
-                document.getElementById('messages').innerHTML = '<p style="color: red;">Erreur de chargement</p>';
+                document.getElementById('messages').innerHTML = '<p style="color: red;">Loading error</p>';
             }
         }
         
@@ -461,7 +461,7 @@ def index():
                     updateStatus();
                 }
             } catch (e) {
-                alert('Erreur lors de l\'envoi du message');
+                alert("Error sending message");
             }
         });
         
