@@ -5,7 +5,7 @@ from datetime import datetime
 from typing import Optional
 import psycopg2
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field
 
 app = FastAPI(title="Hybrid Cloud Demo", version="2.0")
@@ -46,61 +46,43 @@ def get_db():
     return conn
 
 
-def init_db():
-    """Initialize database tables"""
-    try:
-        conn = get_db()
-        cur = conn.cursor()
-        cur.execute("""
-            CREATE TABLE IF NOT EXISTS hits (
-                id SERIAL PRIMARY KEY,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            );
-        """)
-        cur.execute("""
-            CREATE TABLE IF NOT EXISTS messages (
-                id SERIAL PRIMARY KEY,
-                author VARCHAR(50) DEFAULT 'Anonymous',
-                content TEXT NOT NULL,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            );
-        """)
-        conn.close()
-    except Exception:
-        pass
-
-
-@app.on_event("startup")
-async def startup_event():
-    """Initialize database on startup"""
-    init_db()
+def ensure_tables(cur):
+    """Ensure database schema exists"""
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS hits (
+            id SERIAL PRIMARY KEY,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+    """)
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS messages (
+            id SERIAL PRIMARY KEY,
+            author VARCHAR(50) DEFAULT 'Anonymous',
+            content TEXT NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+    """)
 
 
 @app.get("/health")
 def health():
-    """Health check endpoint"""
-    return {"status": "ok", "timestamp": datetime.now().isoformat()}
+    return {"status": "ok"}
 
 
 @app.get("/api/status")
 def get_status() -> SystemStatus:
-    """Get current system status"""
     app_ip = socket.gethostbyname(socket.gethostname())
-
     try:
         conn = get_db()
         cur = conn.cursor()
-
+        ensure_tables(cur)
         cur.execute("INSERT INTO hits DEFAULT VALUES;")
         cur.execute("SELECT COUNT(*) FROM hits;")
         hits = cur.fetchone()[0]
-
         cur.execute("SELECT inet_server_addr();")
         db_leader_ip = cur.fetchone()[0]
-
         cur.execute("SELECT COUNT(*) FROM messages;")
         msg_count = cur.fetchone()[0]
-
         conn.close()
 
         return SystemStatus(
@@ -115,57 +97,41 @@ def get_status() -> SystemStatus:
             web_ip=app_ip,
             db_leader_ip=None,
             total_hits=0,
-            db_status=f"failover: {str(e)[:50]}",
+            db_status=f"Failover: {str(e)[:60]}",
             messages_count=0
         )
 
 
 @app.get("/api/messages")
 def get_messages(limit: int = 20):
-    """Get recent messages"""
     try:
         conn = get_db()
         cur = conn.cursor()
-        cur.execute("""
-            SELECT author, content, created_at 
-            FROM messages 
-            ORDER BY created_at DESC 
-            LIMIT %s
-        """, (limit,))
-        messages = [
-            {
-                "author": row[0],
-                "content": row[1],
-                "created_at": row[2].isoformat()
-            }
-            for row in cur.fetchall()
-        ]
+        ensure_tables(cur)
+        cur.execute("SELECT author, content, created_at FROM messages ORDER BY created_at DESC LIMIT %s", (limit,))
+        messages = [{"author": row[0], "content": row[1], "created_at": row[2].isoformat()} for row in cur.fetchall()]
         conn.close()
         return {"messages": messages}
-    except Exception as e:
-        raise HTTPException(status_code=503, detail=f"DB unavailable: {e}")
+    except Exception:
+        return {"messages": []}
 
 
 @app.post("/api/messages")
 def post_message(message: Message):
-    """Post a new message"""
     try:
         conn = get_db()
         cur = conn.cursor()
-        cur.execute(
-            "INSERT INTO messages (author, content) VALUES (%s, %s) RETURNING id;",
-            (message.author, message.content)
-        )
+        ensure_tables(cur)
+        cur.execute("INSERT INTO messages (author, content) VALUES (%s, %s) RETURNING id;", (message.author, message.content))
         msg_id = cur.fetchone()[0]
         conn.close()
         return {"id": msg_id, "status": "posted"}
-    except Exception as e:
-        raise HTTPException(status_code=503, detail=f"DB unavailable: {e}")
+    except Exception:
+        raise HTTPException(status_code=503, detail="DB Unavailable")
 
 
 @app.get("/", response_class=HTMLResponse)
 def index():
-    """Main page with modern UI"""
     return """
 <!DOCTYPE html>
 <html lang="en">
@@ -177,225 +143,137 @@ def index():
         * { margin: 0; padding: 0; box-sizing: border-box; }
         
         body {
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            font-family: 'Segoe UI', system-ui, sans-serif;
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
             min-height: 100vh;
             padding: 20px;
             color: #333;
+            transition: all 0.8s ease;
         }
         
-        .container {
-            max-width: 1200px;
-            margin: 0 auto;
+        /* SUBTLE FAILOVER STYLE */
+        body.failover-mode {
+            background: linear-gradient(135deg, #374151 0%, #111827 100%);
         }
         
-        .header {
-            text-align: center;
-            color: white;
-            margin-bottom: 30px;
-            animation: fadeIn 0.5s;
-        }
-        
-        .header h1 {
-            font-size: 2.5em;
-            margin-bottom: 10px;
-            text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
-        }
-        
-        .cards {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
-            gap: 20px;
-            margin-bottom: 30px;
-        }
-        
-        .card {
-            background: white;
-            border-radius: 15px;
-            padding: 25px;
-            box-shadow: 0 10px 30px rgba(0,0,0,0.2);
-            animation: slideUp 0.5s;
-        }
-        
-        .status-badge {
-            display: inline-block;
-            padding: 5px 15px;
-            border-radius: 20px;
-            font-size: 0.9em;
-            font-weight: bold;
-            margin: 5px 0;
-        }
-        
-        .status-ok { background: #10b981; color: white; }
-        .status-error { background: #ef4444; color: white; }
-        
-        .metric {
-            font-size: 2.5em;
-            font-weight: bold;
-            color: #667eea;
-            margin: 10px 0;
-        }
-        
-        .label {
-            color: #666;
-            font-size: 0.9em;
-            text-transform: uppercase;
-            letter-spacing: 1px;
-        }
-        
-        .ip-display {
-            font-family: 'Courier New', monospace;
-            background: #f3f4f6;
-            padding: 10px;
-            border-radius: 8px;
-            margin: 10px 0;
-            font-size: 1.1em;
-        }
-        
-        .message-section {
-            background: white;
-            border-radius: 15px;
-            padding: 25px;
-            box-shadow: 0 10px 30px rgba(0,0,0,0.2);
-        }
-        
-        .message-form {
-            display: flex;
-            flex-direction: column;
-            gap: 15px;
-            margin-bottom: 30px;
-        }
-        
-        input, textarea {
+        .failover-banner {
+            display: none;
+            background: #fff7ed;
+            color: #9a3412;
             padding: 12px;
-            border: 2px solid #e5e7eb;
             border-radius: 8px;
-            font-size: 1em;
-            transition: border 0.3s;
-        }
-        
-        input:focus, textarea:focus {
-            outline: none;
-            border-color: #667eea;
-        }
-        
-        button {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            color: white;
-            border: none;
-            padding: 12px 30px;
-            border-radius: 8px;
-            font-size: 1em;
-            font-weight: bold;
-            cursor: pointer;
-            transition: transform 0.2s;
-        }
-        
-        button:hover {
-            transform: translateY(-2px);
-        }
-        
-        .messages-list {
-            max-height: 400px;
-            overflow-y: auto;
-        }
-        
-        .message-item {
-            background: #f9fafb;
-            padding: 15px;
-            border-radius: 8px;
-            margin-bottom: 10px;
-            border-left: 4px solid #667eea;
-        }
-        
-        .message-author {
-            font-weight: bold;
-            color: #667eea;
-            margin-bottom: 5px;
-        }
-        
-        .message-time {
-            font-size: 0.8em;
-            color: #999;
-        }
-        
-        .pulse {
-            animation: pulse 2s infinite;
-        }
-        
-        @keyframes fadeIn {
-            from { opacity: 0; }
-            to { opacity: 1; }
-        }
-        
-        @keyframes slideUp {
-            from { transform: translateY(20px); opacity: 0; }
-            to { transform: translateY(0); opacity: 1; }
-        }
-        
-        @keyframes pulse {
-            0%, 100% { opacity: 1; }
-            50% { opacity: 0.5; }
-        }
-        
-        .footer {
             text-align: center;
-            color: white;
-            margin-top: 30px;
-            font-size: 0.9em;
+            margin-bottom: 20px;
+            border: 1px solid #fdba74;
+            font-weight: bold;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
         }
+        body.failover-mode .failover-banner { display: block; }
+        
+        .container { max-width: 1100px; margin: 0 auto; }
+        .header { text-align: center; color: white; margin-bottom: 30px; }
+        .header h1 { font-size: 2.2em; text-shadow: 0 2px 4px rgba(0,0,0,0.2); }
+        
+        .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 20px; margin-bottom: 30px; }
+        .card { 
+            background: white; border-radius: 12px; padding: 20px; 
+            box-shadow: 0 4px 20px rgba(0,0,0,0.1); 
+            transition: all 0.5s ease;
+            border: 2px solid transparent;
+        }
+        
+        /* Highlight only the DB card during failover */
+        body.failover-mode .db-card {
+            border-color: #f97316;
+            box-shadow: 0 0 15px rgba(249, 115, 22, 0.4);
+            animation: borderPulse 2s infinite;
+        }
+        
+        .status-badge { display: inline-block; padding: 4px 12px; border-radius: 20px; font-size: 0.8em; font-weight: bold; margin-top: 8px; }
+        .status-ok { background: #dcfce7; color: #166534; }
+        .status-error { background: #fee2e2; color: #991b1b; }
+        
+        .metric { font-size: 2em; font-weight: bold; color: #4f46e5; margin: 5px 0; }
+        .label { color: #6b7280; font-size: 0.8em; text-transform: uppercase; font-weight: 600; }
+        .ip-display { font-family: monospace; background: #f3f4f6; padding: 8px; border-radius: 6px; margin: 8px 0; font-size: 1em; }
+        
+        .message-section { background: white; border-radius: 12px; padding: 25px; box-shadow: 0 4px 20px rgba(0,0,0,0.1); }
+        .message-form { display: flex; flex-direction: column; gap: 12px; margin-bottom: 25px; }
+        input, textarea { padding: 10px; border: 1px solid #d1d5db; border-radius: 6px; }
+        button { 
+            background: #4f46e5; color: white; border: none; padding: 10px; 
+            border-radius: 6px; font-weight: bold; cursor: pointer; 
+        }
+        button:disabled { background: #9ca3af; cursor: not-allowed; }
+        
+        .messages-list { max-height: 300px; overflow-y: auto; }
+        .message-item { background: #f9fafb; padding: 12px; border-radius: 8px; margin-bottom: 8px; border-left: 4px solid #4f46e5; }
+        .message-author { font-weight: bold; color: #4f46e5; font-size: 0.9em; }
+        .message-time { font-size: 0.75em; color: #9ca3af; }
+
+        @keyframes borderPulse {
+            0% { border-color: #f97316; }
+            50% { border-color: #fdba74; }
+            100% { border-color: #f97316; }
+        }
+        
+        .footer { text-align: center; color: rgba(255,255,255,0.8); margin-top: 30px; font-size: 0.85em; line-height: 1.6; }
+        body.failover-mode .footer { color: #9ca3af; }
     </style>
 </head>
 <body>
     <div class="container">
+        <div class="failover-banner" id="failover-banner">
+            ⚠️ DATABASE FAILOVER IN PROGRESS - ELECTING NEW LEADER...
+        </div>
+
         <div class="header">
             <h1>🚀 Hybrid Cloud Demo</h1>
-            <p>AWS + OpenStack • FastAPI + PostgreSQL + Patroni</p>
+            <p style="opacity: 0.9;">AWS + OpenStack Resilience Test</p>
         </div>
         
         <div class="cards">
             <div class="card">
                 <div class="label">☁️ Web Server (AWS)</div>
-                <div class="ip-display" id="web-ip">Loading...</div>
+                <div class="ip-display" style="color: #2563eb;" id="web-ip">Loading...</div>
                 <div class="status-badge status-ok">Active</div>
             </div>
             
-            <div class="card">
+            <div class="card db-card">
                 <div class="label">🐘 DB Leader (OpenStack)</div>
-                <div class="ip-display" id="db-ip">Loading...</div>
+                <div class="ip-display" style="color: #059669;" id="db-ip">Loading...</div>
                 <div class="status-badge" id="db-status">Checking...</div>
             </div>
             
             <div class="card">
-                <div class="label">📊 Total Hits</div>
-                <div class="metric" id="hits">0</div>
-                <div class="label">💬 Messages</div>
-                <div class="metric" id="msg-count">0</div>
+                <div class="label">📊 Metrics</div>
+                <div style="display: flex; gap: 20px;">
+                    <div><div class="metric" id="hits">0</div><div class="label">Hits</div></div>
+                    <div><div class="metric" id="msg-count">0</div><div class="label">Msgs</div></div>
+                </div>
             </div>
         </div>
         
         <div class="message-section">
-            <h2 style="margin-bottom: 20px;">💬 Message Board</h2>
-            
             <form class="message-form" id="msg-form">
-                <input type="text" id="author" placeholder="Your name (optional)" maxlength="50">
-                <textarea id="content" placeholder="Your message..." rows="3" maxlength="500" required></textarea>
-                <button type="submit">Send</button>
+                <div style="display: grid; grid-template-columns: 1fr 2fr; gap: 10px;">
+                    <input type="text" id="author" placeholder="Name" maxlength="50">
+                    <input type="text" id="content" placeholder="Type a message..." maxlength="500" required>
+                </div>
+                <button type="submit" id="submit-btn">Post to Database</button>
             </form>
-            
-            <h3 style="margin-bottom: 15px;">Recent Messages</h3>
-            <div class="messages-list" id="messages">
-                <p style="text-align: center; color: #999;">Loading...</p>
-            </div>
+            <div class="messages-list" id="messages"></div>
         </div>
         
         <div class="footer">
-            <p>💡 Test resilience: Stop a DB VM to see Patroni failover (~35s)</p>
-            <p>🔄 Auto-refresh every 3 seconds</p>
+            <p>🔄 Automatic refresh every 3 seconds</p>
+            <p><i>Failover test: Stop a DB node to trigger Patroni leader election (~35s)</i></p>
         </div>
     </div>
     
     <script>
+        let isFailover = false;
+
         async function updateStatus() {
             try {
                 const res = await fetch('/api/status');
@@ -407,70 +285,66 @@ def index():
                 document.getElementById('msg-count').textContent = data.messages_count;
                 
                 const statusEl = document.getElementById('db-status');
+                const submitBtn = document.getElementById('submit-btn');
+
                 if (data.db_status === 'connected') {
-                    statusEl.textContent = 'Connected';
+                    isFailover = false;
+                    document.body.classList.remove('failover-mode');
+                    statusEl.textContent = 'CONNECTED';
                     statusEl.className = 'status-badge status-ok';
+                    submitBtn.disabled = false;
                 } else {
-                    statusEl.textContent = 'Failover...';
-                    statusEl.className = 'status-badge status-error pulse';
+                    isFailover = true;
+                    document.body.classList.add('failover-mode');
+                    statusEl.textContent = 'FAILOVER';
+                    statusEl.className = 'status-badge status-error';
+                    submitBtn.disabled = true;
                 }
-            } catch (e) {
-                console.error('Status update failed:', e);
-            }
+            } catch (e) { console.error(e); }
         }
         
         async function loadMessages() {
+            if (isFailover) return;
             try {
                 const res = await fetch('/api/messages');
                 const data = await res.json();
                 const container = document.getElementById('messages');
                 
                 if (data.messages.length === 0) {
-                    container.innerHTML = '<p style="text-align: center; color: #999;">No messages yet</p>';
+                    container.innerHTML = '<p style="text-align: center; color: #9ca3af;">No messages yet</p>';
                     return;
                 }
                 
                 container.innerHTML = data.messages.map(msg => `
                     <div class="message-item">
                         <div class="message-author">${msg.author}</div>
-                        <div>${msg.content}</div>
-                        <div class="message-time">${new Date(msg.created_at).toLocaleString('en-US')}</div>
+                        <div style="margin: 4px 0;">${msg.content}</div>
+                        <div class="message-time">${new Date(msg.created_at).toLocaleTimeString()}</div>
                     </div>
                 `).join('');
-            } catch (e) {
-                document.getElementById('messages').innerHTML = '<p style="color: red;">Loading error</p>';
-            }
+            } catch (e) { console.error(e); }
         }
         
         document.getElementById('msg-form').addEventListener('submit', async (e) => {
             e.preventDefault();
             const author = document.getElementById('author').value || 'Anonymous';
             const content = document.getElementById('content').value;
-            
             try {
                 const res = await fetch('/api/messages', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ author, content })
                 });
-                
                 if (res.ok) {
                     document.getElementById('content').value = '';
-                    document.getElementById('author').value = '';
                     loadMessages();
                     updateStatus();
                 }
-            } catch (e) {
-                alert("Error sending message");
-            }
+            } catch (e) { alert("DB Error"); }
         });
         
-        updateStatus();
-        loadMessages();
-        setInterval(() => {
-            updateStatus();
-            loadMessages();
-        }, 3000);
+        updateStatus(); loadMessages();
+        setInterval(() => { updateStatus(); loadMessages(); }, 3000);
     </script>
 </body>
 </html>
