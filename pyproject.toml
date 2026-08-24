@@ -9,7 +9,7 @@ package-mode = false
 [tool.poetry.dependencies]
 python = "^3.12"
 fastapi = ">=0.136,<0.142"
-uvicorn = "^0.45.0"
+uvicorn = ">=0.45,<0.53"
 psycopg2-binary = "^2.9.12"
 
 
