@@ -13,3 +13,11 @@ updates:
     labels:
       - "dependencies"
       - "python"
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    cooldown:
+      default-days: 5
+    commit-message:
+      prefix: "chore(ci)"
